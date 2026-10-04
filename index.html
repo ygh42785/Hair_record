@@ -26,7 +26,9 @@ label{font-size:13px;color:var(--sub);display:grid;gap:5px}
 input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px;width:100%}
 textarea{min-height:72px;resize:vertical}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid var(--ac);outline-offset:1px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.row>*,form>*,label{min-width:0}
+input[type=date]{display:block;width:100%;max-width:100%;min-width:0;min-height:46px;-webkit-appearance:none;appearance:none;text-align:left}
 input[type=color]{height:44px;padding:3px}
 button{font:inherit;border:0;border-radius:12px;padding:13px;background:var(--ac);color:var(--aci);font-weight:600;cursor:pointer}
 button.ghost{background:transparent;color:var(--sub);padding:4px 6px;font-weight:400;font-size:13px}
@@ -57,6 +59,7 @@ button.ghost{background:transparent;color:var(--sub);padding:4px 6px;font-weight
 #ov img{width:100%;border-radius:14px;display:block}
 .btns{display:flex;gap:8px}.btns button{flex:1;padding:10px}
 details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:8px 0;min-height:90px}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;display:none;z-index:30;max-width:90%;text-align:center}
 </style>
 </head>
 <body>
@@ -82,7 +85,8 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 <label>배합 · 레시피<textarea id="recipe" placeholder="6레벨 애쉬 + 7레벨 브라운 1:1, 산화제 6% 1.5배, 30분"></textarea></label>
 <label>메모<textarea id="memo" placeholder="모발 끝 손상 있음. 다음엔 트리트먼트 먼저"></textarea></label>
 <label>색상 칩<input id="color" type="color" value="#7a5c4a"></label>
-<button type="submit">기록 저장</button>
+<button type="submit" id="sub">기록 저장</button>
+<button type="button" class="ghost" id="cancel" hidden>수정 취소</button>
 </form>
 </section>
 
@@ -104,15 +108,18 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 </main>
 <div id="ov"><div class="box" id="box"></div></div>
 
+<div id="toast" role="status"></div>
 <script>
 const KEY="sulsul-records",RK="sulsul-rate",$=id=>document.getElementById(id);
-let records=[],ptag="";
+let records=[],ptag="",editId=null;
+let tt;function say(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(tt);tt=setTimeout(()=>t.style.display="none",2800)}
+function twice(b,txt,fn){let on=false,orig=b.textContent,tm;b.onclick=()=>{if(on){clearTimeout(tm);fn();return}on=true;b.textContent=txt;tm=setTimeout(()=>{on=false;b.textContent=orig},3000)}}
 try{records=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
 try{$("rate").value=localStorage.getItem(RK)||""}catch(e){}
 $("date").valueAsDate=new Date();
 const won=n=>Number(n||0).toLocaleString("ko-KR")+"원";
 function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(records));return true}catch(e){alert("저장 공간이 가득 찼어요. 오래된 사진 기록을 지우거나 백업해 주세요.");return false}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(records));return true}catch(e){say("저장 공간이 가득 찼어요. 오래된 사진 기록을 지우거나 백업해 주세요.");return false}}
 
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.setAttribute("aria-selected",x===b));
@@ -123,7 +130,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
 $("kind").onchange=()=>{$("kindEtc").hidden=$("kind").value!=="기타"};
 let photoData="";
 $("photo").onchange=e=>{
-  const f=e.target.files[0];photoData="";$("pv").style.display="none";if(!f)return;
+  const f=e.target.files[0];if(!f)return;
   const img=new Image(),u=URL.createObjectURL(f);
   img.onload=()=>{const m=900,s=Math.min(1,m/Math.max(img.width,img.height)),c=document.createElement("canvas");
     c.width=img.width*s;c.height=img.height*s;c.getContext("2d").drawImage(img,0,0,c.width,c.height);
@@ -134,11 +141,22 @@ $("photo").onchange=e=>{
 $("f").onsubmit=e=>{
   e.preventDefault();
   const tags=$("tags").value.split(",").map(t=>t.trim()).filter(Boolean);
-  records.unshift({id:Date.now(),name:$("name").value.trim(),date:$("date").value,kind:($("kind").value==="기타"&&$("kindEtc").value.trim())?$("kindEtc").value.trim():$("kind").value,amount:$("amount").value,tags,photo:photoData,recipe:$("recipe").value.trim(),memo:$("memo").value.trim(),color:$("color").value});
-  if(!save()){records.shift();return}
-  ["name","amount","tags","recipe","memo","photo","kindEtc"].forEach(i=>$(i).value="");photoData="";$("pv").style.display="none";
-  alert("저장했어요. '기록 목록'에서 확인해보세요.");
+  const rec={id:editId||Date.now(),name:$("name").value.trim(),date:$("date").value,kind:($("kind").value==="기타"&&$("kindEtc").value.trim())?$("kindEtc").value.trim():$("kind").value,amount:$("amount").value,tags,photo:photoData,recipe:$("recipe").value.trim(),memo:$("memo").value.trim(),color:$("color").value};
+  const old=records.slice(),k=records.findIndex(x=>x.id===rec.id);
+  if(k>=0)records[k]=rec;else records.unshift(rec);
+  if(!save()){records=old;return}
+  const was=editId!==null;resetForm();say(was?"수정했어요.":"저장했어요. '기록 목록'에서 확인해보세요.");
+  if(was)document.querySelector('[data-t="list"]').click();
 };
+function resetForm(){editId=null;["name","amount","tags","recipe","memo","photo","kindEtc"].forEach(i=>$(i).value="");photoData="";$("pv").style.display="none";$("kindEtc").hidden=true;$("kind").value="염색";$("sub").textContent="기록 저장";$("cancel").hidden=true}
+$("cancel").onclick=()=>{resetForm();say("수정을 취소했어요.")};
+function editRec(r){
+  editId=r.id;const std=["염색","탈색","펌","커트","클리닉","기타"].includes(r.kind);
+  $("name").value=r.name;$("date").value=r.date;$("kind").value=std?r.kind:"기타";$("kindEtc").value=std?"":r.kind;$("kindEtc").hidden=$("kind").value!=="기타";
+  $("amount").value=r.amount||"";$("tags").value=(r.tags||[]).join(", ");$("recipe").value=r.recipe||"";$("memo").value=r.memo||"";$("color").value=r.color||"#7a5c4a";
+  photoData=r.photo||"";if(photoData){$("pv").src=photoData;$("pv").style.display="block"}else $("pv").style.display="none";$("photo").value="";
+  $("sub").textContent="수정 저장";$("cancel").hidden=false;
+  document.querySelector('[data-t="new"]').click();window.scrollTo(0,0)}
 
 function summary(){
   const n=new Date(),ym=n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0");
@@ -146,7 +164,6 @@ function summary(){
   $("mlabel").textContent=(n.getMonth()+1)+"월 매출";$("msum").textContent=won(s);
   $("minc").textContent=isNaN(rt)?"비율을 입력하세요":won(Math.round(s*rt/100));
 }
-function del(r){if(confirm("이 기록을 삭제할까요?")){records=records.filter(x=>x.id!==r.id);save();render()}}
 
 function renderList(){
   summary();
@@ -160,9 +177,10 @@ function renderList(){
     const b=el("div","body"),top=el("div","top");
     top.append(el("span","name",r.name),el("span","date",r.date));
     const ch=el("div","chips");ch.append(el("span","chip",r.kind));(r.tags||[]).forEach(t=>ch.append(el("span","chip",t)));
-    const d=el("button","ghost","삭제");d.type="button";d.onclick=()=>del(r);
+    const d=el("button","ghost","삭제");d.type="button";twice(d,"한 번 더 누르면 삭제",()=>{records=records.filter(x=>x.id!==r.id);save();render()});
+    const ed=el("button","ghost","수정");ed.type="button";ed.onclick=()=>editRec(r);
     b.append(top,ch);if(r.amount)b.append(el("div","amt",won(r.amount)));
-    b.append(el("div","recipe",r.recipe),el("div","memo",r.memo),d);c.append(th,b);L.append(c);
+    b.append(el("div","recipe",r.recipe),el("div","memo",r.memo),ed,d);c.append(th,b);L.append(c);
   });
 }
 
@@ -188,8 +206,8 @@ function render(){renderList();renderPort()}
 $("q").oninput=renderList;
 $("rate").oninput=()=>{try{localStorage.setItem(RK,$("rate").value)}catch(e){}summary()};
 $("exp").onclick=()=>{$("bk").value=JSON.stringify(records);$("bk").select()};
-$("imp").onclick=()=>{try{const d=JSON.parse($("bk").value);if(!Array.isArray(d))throw 0;
-  if(confirm("지금 기록을 이 백업으로 바꿀까요?")){records=d;save();render()}}catch(e){alert("백업 글자가 올바르지 않아요. 내보내기로 만든 글자를 그대로 붙여넣어 주세요.")}};
+twice($("imp"),"한 번 더 누르면 덮어써요",()=>{try{const d=JSON.parse($("bk").value);if(!Array.isArray(d))throw 0;
+  records=d;save();render();say("백업을 불러왔어요")}catch(e){say("백업 글자가 올바르지 않아요. 내보내기로 만든 글자를 그대로 붙여넣어 주세요.")}});
 render();
 </script>
 </body>
