@@ -60,6 +60,8 @@ button.ghost{background:transparent;color:var(--sub);padding:4px 6px;font-weight
 .btns{display:flex;gap:8px}.btns button{flex:1;padding:10px}
 details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:8px 0;min-height:90px}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;display:none;z-index:30;max-width:90%;text-align:center}
+.lbl{font-size:12px;color:var(--ac);font-weight:600;margin-top:8px}.dbox{margin:2px 0 6px}
+.tile small{display:block;font-weight:400;opacity:.85;font-size:12px}
 </style>
 </head>
 <body>
@@ -102,6 +104,7 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 </section>
 
 <section id="v-port" hidden>
+<input class="search" id="pq" type="search" placeholder="시술·태그·배합으로 검색" aria-label="포트폴리오 검색">
 <div class="chips" id="tagbar"></div>
 <div class="grid" id="grid"></div>
 </section>
@@ -111,7 +114,7 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 <div id="toast" role="status"></div>
 <script>
 const KEY="sulsul-records",RK="sulsul-rate",$=id=>document.getElementById(id);
-let records=[],ptag="",editId=null;
+let records=[],ptag="",pq="",editId=null;
 let tt;function say(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(tt);tt=setTimeout(()=>t.style.display="none",2800)}
 function twice(b,txt,fn){let on=false,orig=b.textContent,tm;b.onclick=()=>{if(on){clearTimeout(tm);fn();return}on=true;b.textContent=txt;tm=setTimeout(()=>{on=false;b.textContent=orig},3000)}}
 try{records=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
@@ -165,6 +168,10 @@ function summary(){
   $("minc").textContent=isNaN(rt)?"비율을 입력하세요":won(Math.round(s*rt/100));
 }
 
+function detailBox(r){const w=el("div","dbox");
+  if(r.recipe)w.append(el("div","lbl","배합 비율"),el("div","recipe",r.recipe));
+  if(r.memo)w.append(el("div","lbl","메모"),el("div","memo",r.memo));
+  if(!w.children.length)w.append(el("div","memo","적어둔 배합·메모가 없어요."));return w}
 function renderList(){
   summary();
   const q=$("q").value.trim().toLowerCase(),L=$("list");L.textContent="";
@@ -180,7 +187,9 @@ function renderList(){
     const d=el("button","ghost","삭제");d.type="button";twice(d,"한 번 더 누르면 삭제",()=>{records=records.filter(x=>x.id!==r.id);save();render()});
     const ed=el("button","ghost","수정");ed.type="button";ed.onclick=()=>editRec(r);
     b.append(top,ch);if(r.amount)b.append(el("div","amt",won(r.amount)));
-    b.append(el("div","recipe",r.recipe),el("div","memo",r.memo),ed,d);c.append(th,b);L.append(c);
+    if(r.recipe||r.memo){const mo=el("button","ghost","더보기 ▾"),box=detailBox(r);box.hidden=true;mo.type="button";
+      mo.onclick=()=>{box.hidden=!box.hidden;mo.textContent=box.hidden?"더보기 ▾":"접기 ▴"};b.append(mo,box)}
+    b.append(ed,d);c.append(th,b);L.append(c);
   });
 }
 
@@ -189,21 +198,23 @@ function renderPort(){
   const bar=$("tagbar");bar.textContent="";
   [["","전체"],...tags.map(t=>[t,t])].forEach(([v,l])=>{const b=el("button","chip"+(ptag===v?" on":""),l);b.type="button";b.onclick=()=>{ptag=v;renderPort()};bar.append(b)});
   const g=$("grid");g.textContent="";
-  const items=ph.filter(r=>!ptag||(r.tags||[]).includes(ptag));
-  if(!items.length){const e=el("div","empty","사진이 있는 기록이 포트폴리오에 모여요. 기록할 때 완성 사진을 붙여보세요.");e.style.gridColumn="1/-1";g.append(e);return}
+  const qq=pq.trim().toLowerCase();
+  const items=ph.filter(r=>(!ptag||(r.tags||[]).includes(ptag))&&(!qq||(r.kind+" "+(r.tags||[]).join(" ")+" "+r.recipe+" "+r.memo).toLowerCase().includes(qq)));
+  if(!items.length){const e=el("div","empty",ph.length?"검색 결과가 없어요.":"사진이 있는 기록이 포트폴리오에 모여요. 기록할 때 완성 사진을 붙여보세요.");e.style.gridColumn="1/-1";g.append(e);return}
   items.forEach(r=>{const t=el("button","tile");t.type="button";t.style.backgroundImage="url("+r.photo+")";
-    t.append(el("span",null,r.kind+((r.tags||[])[0]?" · "+r.tags[0]:"")));t.onclick=()=>openDetail(r);g.append(t)});
+    const sp=el("span",null,r.kind+((r.tags||[])[0]?" · "+r.tags[0]:""));sp.append(el("small",null,"더보기 ›"));t.append(sp);t.onclick=()=>openDetail(r);g.append(t)});
 }
 function openDetail(r){
   const bx=$("box");bx.textContent="";const im=el("img");im.src=r.photo;im.alt=r.kind;
   const ch=el("div","chips");ch.append(el("span","chip",r.kind));(r.tags||[]).forEach(t=>ch.append(el("span","chip",t)));
   const cl=el("button",null,"닫기");cl.type="button";cl.style.width="100%";cl.style.marginTop="8px";cl.onclick=()=>$("ov").style.display="none";
-  bx.append(im,ch,el("div","recipe",r.recipe),el("div","memo",r.memo),cl);$("ov").style.display="flex";
+  bx.append(im,ch,detailBox(r),cl);$("ov").style.display="flex";
 }
 $("ov").onclick=e=>{if(e.target===$("ov"))$("ov").style.display="none"};
 function render(){renderList();renderPort()}
 
 $("q").oninput=renderList;
+$("pq").oninput=()=>{pq=$("pq").value;renderPort()};
 $("rate").oninput=()=>{try{localStorage.setItem(RK,$("rate").value)}catch(e){}summary()};
 $("exp").onclick=()=>{$("bk").value=JSON.stringify(records);$("bk").select()};
 twice($("imp"),"한 번 더 누르면 덮어써요",()=>{try{const d=JSON.parse($("bk").value);if(!Array.isArray(d))throw 0;
