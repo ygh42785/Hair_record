@@ -62,6 +62,7 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;display:none;z-index:30;max-width:90%;text-align:center}
 .lbl{font-size:12px;color:var(--ac);font-weight:600;margin-top:8px}.dbox{margin:2px 0 6px}
 .tile small{display:block;font-weight:400;opacity:.85;font-size:12px}
+button.line{background:transparent;color:var(--ink);border:1px solid var(--line)}.bkbox{margin-top:22px}
 </style>
 </head>
 <body>
@@ -98,7 +99,9 @@ details{margin-top:22px;color:var(--sub);font-size:13px}details textarea{margin:
 <div class="line"><span>이번 달 예상 인센티브</span><strong id="minc">-</strong></div></div>
 <input class="search" id="q" type="search" placeholder="별명·레시피·태그로 검색" aria-label="검색">
 <div class="list" id="list"></div>
-<details><summary>백업 · 복원 (폰을 바꾸기 전에 꼭!)</summary>
+<div class="bkbox"><div class="btns"><button type="button" id="fexp">백업 파일 저장</button><button type="button" class="line" id="fimp">백업 파일 불러오기</button></div>
+<p class="hint" style="margin:8px 0 0"><span id="bkt"></span><span id="usage"></span></p><input type="file" id="ffile" accept=".json,application/json" hidden></div>
+<details><summary>글자로 백업 (예비 방법)</summary>
 <textarea id="bk" placeholder="내보내기를 누르면 백업 글자가 나와요. 복사해서 카톡 나와의 채팅에 보관하세요."></textarea>
 <div class="btns"><button type="button" id="exp">내보내기</button><button type="button" id="imp">가져오기</button></div></details>
 </section>
@@ -117,12 +120,26 @@ const KEY="sulsul-records",RK="sulsul-rate",$=id=>document.getElementById(id);
 let records=[],ptag="",pq="",editId=null;
 let tt;function say(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(tt);tt=setTimeout(()=>t.style.display="none",2800)}
 function twice(b,txt,fn){let on=false,orig=b.textContent,tm;b.onclick=()=>{if(on){clearTimeout(tm);fn();return}on=true;b.textContent=txt;tm=setTimeout(()=>{on=false;b.textContent=orig},3000)}}
-try{records=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
 try{$("rate").value=localStorage.getItem(RK)||""}catch(e){}
 $("date").valueAsDate=new Date();
 const won=n=>Number(n||0).toLocaleString("ko-KR")+"원";
 function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(records));return true}catch(e){say("저장 공간이 가득 찼어요. 오래된 사진 기록을 지우거나 백업해 주세요.");return false}}
+let db=null;
+function openDB(){return new Promise((res,rej)=>{try{const q=indexedDB.open("sulsul-db",1);q.onupgradeneeded=()=>q.result.createObjectStore("kv");q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)}catch(e){rej(e)}})}
+const idbGet=k=>new Promise((res,rej)=>{const r=db.transaction("kv").objectStore("kv").get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const idbSet=(k,v)=>new Promise((res,rej)=>{const t=db.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)});
+function save(){
+  if(db)idbSet("records",records).catch(()=>say("저장하지 못했어요. 저장 공간이 부족할 수 있어요. 백업 후 오래된 사진 기록을 지워주세요."));
+  else{try{localStorage.setItem(KEY,JSON.stringify(records))}catch(e){say("저장하지 못했어요. 백업해 주세요.")}}
+  return true}
+async function boot(){
+  try{db=await openDB();const v=await idbGet("records");
+    if(Array.isArray(v))records=v;
+    else{let old=[];try{old=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}records=old;if(old.length)await idbSet("records",old)}
+  }catch(e){db=null;try{records=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e2){}}
+  render();
+  try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+}
 
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.setAttribute("aria-selected",x===b));
@@ -211,7 +228,7 @@ function openDetail(r){
   bx.append(im,ch,detailBox(r),cl);$("ov").style.display="flex";
 }
 $("ov").onclick=e=>{if(e.target===$("ov"))$("ov").style.display="none"};
-function render(){renderList();renderPort()}
+function render(){renderList();renderPort();bkHint()}
 
 $("q").oninput=renderList;
 $("pq").oninput=()=>{pq=$("pq").value;renderPort()};
@@ -219,7 +236,24 @@ $("rate").oninput=()=>{try{localStorage.setItem(RK,$("rate").value)}catch(e){}su
 $("exp").onclick=()=>{$("bk").value=JSON.stringify(records);$("bk").select()};
 twice($("imp"),"한 번 더 누르면 덮어써요",()=>{try{const d=JSON.parse($("bk").value);if(!Array.isArray(d))throw 0;
   records=d;save();render();say("백업을 불러왔어요")}catch(e){say("백업 글자가 올바르지 않아요. 내보내기로 만든 글자를 그대로 붙여넣어 주세요.")}});
-render();
+function bkHint(){let t="";try{t=localStorage.getItem("sulsul-lastbk")||""}catch(e){}
+  if(!t)$("bkt").textContent=records.length?"아직 백업한 적이 없어요. 위 버튼으로 파일을 저장해두세요.":"기록이 쌓이면 이 버튼으로 백업 파일을 저장해두세요.";
+  else{const n=Math.floor((Date.now()-new Date(t))/864e5);$("bkt").textContent="마지막 백업: "+(n<=0?"오늘":n+"일 전")+(n>=7?" · 백업할 때가 됐어요":"")}
+  try{if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(x=>{$("usage").textContent=" · 저장 공간 사용 "+(x.usage/1048576).toFixed(1)+"MB"})}catch(e){}}
+function markBk(){try{localStorage.setItem("sulsul-lastbk",new Date().toISOString())}catch(e){}bkHint();say("백업 파일을 만들었어요.")}
+$("fexp").onclick=async()=>{
+  const d=new Date(),ymd=d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");
+  const blob=new Blob([JSON.stringify({app:"sulsul",v:1,records,rate:$("rate").value})],{type:"application/json"});
+  const file=new File([blob],"시술기록-백업-"+ymd+".json",{type:"application/json"});
+  try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"시술 기록 백업"});markBk();return}}
+  catch(e){if(e&&e.name==="AbortError")return}
+  const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);markBk()};
+twice($("fimp"),"한 번 더 누르면 파일 선택 (현재 기록은 덮어써져요)",()=>$("ffile").click());
+$("ffile").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;
+  try{const j=JSON.parse(await f.text()),arr=Array.isArray(j)?j:j.records;if(!Array.isArray(arr))throw 0;
+    records=arr;if(j&&j.rate!==undefined){try{localStorage.setItem(RK,j.rate);$("rate").value=j.rate}catch(x){}}
+    save();render();say("백업을 불러왔어요 ("+arr.length+"개 기록)")}catch(err){say("백업 파일이 올바르지 않아요.")}};
+boot();
 </script>
 </body>
 </html>
